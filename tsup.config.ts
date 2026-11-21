@@ -1,7 +1,8 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig((options) => ({
-  entry: ["./src/index.ts"],
+  // `auth` alone: token helpers without the app framework's dependencies
+  entry: { index: "./src/index.ts", auth: "./src/modules/auth.ts" },
   target: "es2022",
   format: ["cjs", "esm"],
   splitting: false,

@@ -8,9 +8,14 @@
   "types": "./index.d.ts",
   "exports": {
     ".": {
-      "require": "./index.cjs",
+      "types": "./index.d.ts",
       "import": "./index.js",
-      "types": "./index.d.ts"
+      "require": "./index.cjs"
+    },
+    "./auth": {
+      "types": "./auth.d.ts",
+      "import": "./auth.js",
+      "require": "./auth.cjs"
     },
     "./package.json": "./package.json"
   },

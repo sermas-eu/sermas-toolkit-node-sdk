@@ -1,7 +1,9 @@
-import * as fs from "fs/promises";
+import * as fs from "node:fs/promises";
 import { Logger } from "@sermas/api-client";
 
-export { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
+
+export const uuidv4 = () => randomUUID();
 
 const logger = new Logger("util");
 

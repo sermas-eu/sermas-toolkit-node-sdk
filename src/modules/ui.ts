@@ -1,15 +1,15 @@
 import {
-  ButtonDto,
-  ButtonsUIContentDto,
   Logger,
-  SessionChangedDto,
-  SupportedContentTypes,
-  UIContentDto,
-  UIContentOptionsDto,
+  sleep,
+  type ButtonDto,
+  type ButtonsUIContentDto,
+  type SessionChangedDto,
+  type SupportedContentTypes,
+  type UIContentDto,
+  type UIContentOptionsDto,
 } from "@sermas/api-client";
-import { sleep } from "openai/core";
 import { ulid } from "ulidx";
-import { BaseSessionWrapper } from "../dto/session.js";
+import type { BaseSessionWrapper } from "../dto/session.js";
 import { SermasApp } from "./sermas.js";
 import { Store } from "./store.js";
 
@@ -89,10 +89,11 @@ class UI {
       return;
     }
 
-    const filtered = app.repository?.avatars?.filter(
-      (a) => a.name === app.settings!.avatar,
+    // an app without an avatar repository has no gender to pass
+    const avatar = app.repository?.avatars?.find(
+      (a) => a.name === app.settings?.avatar,
     );
-    const gender = filtered.length ? filtered[0].gender : undefined;
+    const gender = avatar?.gender;
 
     await this.sermas.sendChatMessage({
       ...session,

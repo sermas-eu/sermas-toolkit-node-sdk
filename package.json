@@ -22,31 +22,35 @@
     "clean": "rm -rf ./dist",
     "build": "npm run clean && tsup && cp package.json README.md LICENSE dist/",
     "build:watch": "tsup --watch",
-    "start": "node index.js",
-    "dev": "tsx watch src/index.ts"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@sermas/api-client": "^1.0.0-alpha.192",
-    "axios": "^1.7.1",
+    "axios": "^1.21.0",
     "eventemitter2": "^6.4.9",
-    "openai": "^4.47.2",
-    "ulidx": "^2.3.0",
-    "uuid": "^9.0.1"
+    "jwt-decode": "^4.0.0",
+    "mqtt": "^5.16.1",
+    "openai": "^7.53.0",
+    "ulidx": "^2.4.1"
   },
   "devDependencies": {
-    "@types/node": "^20.12.12",
-    "@types/uuid": "^9.0.8",
-    "@typescript-eslint/eslint-plugin": "^7.9.0",
-    "@typescript-eslint/parser": "^7.9.0",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.1.3",
-    "prettier": "3.2.5",
-    "tsup": "^8.1.0",
-    "tsx": "^4.10.5",
-    "typescript": "^5.4.5"
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.7",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "tsup": "^9.0.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.1"
   },
   "keywords": [],
   "author": "",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  }
 }

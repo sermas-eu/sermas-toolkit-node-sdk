@@ -1,11 +1,11 @@
 import {
   Logger,
-  SessionChangedDto,
-  SessionStorageRecordDto,
+  type SessionChangedDto,
+  type SessionStorageRecordDto,
 } from "@sermas/api-client";
 import { SermasApp } from "./sermas.js";
 import { uuidv4 } from "../config/util.js";
-import { BaseSessionWrapper } from "../dto/session.js";
+import type { BaseSessionWrapper } from "../dto/session.js";
 
 class Store {
   private readonly logger: Logger;

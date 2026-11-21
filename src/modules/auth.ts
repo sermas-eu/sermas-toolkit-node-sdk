@@ -1,7 +1,7 @@
 import axios, { isAxiosError } from "axios";
-import * as https from "https";
-import { defaults } from "../config/defaults.js";
+import * as https from "node:https";
 import { Logger } from "@sermas/api-client";
+import { defaults } from "../config/defaults.js";
 
 export type AuthConfig = {
   PUBLIC_AUTH_URL?: string;
@@ -11,290 +11,189 @@ export type AuthConfig = {
   PRIVATE_API_BASE_URL?: string;
 };
 
+/** What getAvatarToken returns: the tokens, absent when they could not be had. */
+export type AvatarToken = {
+  appId: string | null;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: Date;
+};
+
 type TokenResponse = {
   accessToken: string;
   refreshToken: string;
   expiresIn: Date;
 };
 
+const logger = new Logger("auth");
+
 const httpsAgent = new https.Agent({
   rejectUnauthorized: process.env.NODE_ENV !== "development",
 });
 
+// a token is reused until this long before it expires
+const EXPIRY_MARGIN_MS = 30 * 1000;
+
+// Tokens shared by every call in this process: a kiosk calls getAvatarToken on
+// each page load, and each fetch is a round trip to Keycloak or the API.
+const tokens = new Map<string, TokenResponse>();
+// concurrent calls for the same token share one request
+const pending = new Map<string, Promise<TokenResponse | null>>();
+
+/** Drops every cached token (tests, or after a secret change). */
+export const clearTokenCache = () => {
+  tokens.clear();
+  pending.clear();
+};
+
+const toToken = (data: {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}): TokenResponse => ({
+  accessToken: data.access_token,
+  refreshToken: data.refresh_token,
+  expiresIn: new Date(Date.now() + data.expires_in * 1000),
+});
+
+const cached = async (
+  key: string,
+  fetch: () => Promise<TokenResponse | null>,
+): Promise<TokenResponse | null> => {
+  const token = tokens.get(key);
+  if (token && token.expiresIn.getTime() - EXPIRY_MARGIN_MS > Date.now())
+    return token;
+  tokens.delete(key);
+
+  let request = pending.get(key);
+  if (!request) {
+    request = fetch().finally(() => pending.delete(key));
+    pending.set(key, request);
+  }
+  const fresh = await request;
+  if (fresh) tokens.set(key, fresh);
+  return fresh;
+};
+
+const logFailure = (what: string, e: unknown) => {
+  if (isAxiosError(e)) {
+    logger.error(
+      `${what} failed: ${e.response?.status ?? e.code} ${JSON.stringify(e.response?.data ?? "")}`,
+    );
+  } else if (e instanceof Error) {
+    logger.error(`${what} failed: ${e.message}`);
+  }
+};
+
+const resolveConfig = (authConfig: AuthConfig) => ({
+  authUrl: authConfig.PUBLIC_AUTH_URL || defaults.auth.PUBLIC_AUTH_URL,
+  realm: authConfig.PUBLIC_AUTH_REALM || defaults.auth.PUBLIC_AUTH_REALM,
+  clientId:
+    authConfig.PRIVATE_AUTH_CLIENT_ID || defaults.auth.PRIVATE_AUTH_CLIENT_ID,
+  clientSecret:
+    authConfig.PRIVATE_AUTH_CLIENT_SECRET ||
+    defaults.auth.PRIVATE_AUTH_CLIENT_SECRET,
+  apiBaseUrl:
+    authConfig.PRIVATE_API_BASE_URL || defaults.auth.PRIVATE_API_BASE_URL,
+});
+
+/** The service account token of the configured client (client credentials). */
+const getClientToken = (config: ReturnType<typeof resolveConfig>) =>
+  cached(
+    `client:${config.authUrl}:${config.realm}:${config.clientId}`,
+    async () => {
+      const url = `${config.authUrl}/realms/${config.realm}/protocol/openid-connect/token`;
+      try {
+        logger.debug(`Requesting client token from ${url}`);
+        const res = await axios.post(
+          url,
+          new URLSearchParams({
+            grant_type: "client_credentials",
+            client_id: config.clientId,
+            client_secret: config.clientSecret,
+          }),
+          { httpsAgent },
+        );
+        return toToken(res.data);
+      } catch (e) {
+        logFailure(`Client token for ${config.clientId}`, e);
+        return null;
+      }
+    },
+  );
+
 /**
- * Returns access and refresh tokens for the given appId
- * @param {string} appId null by default
- * @param {AuthConfig} authConfig
+ * Returns access and refresh tokens of the app's `avatar` client, minted by the
+ * API (POST /platform/token) for the configured client, e.g. the kiosk client.
+ * Without an appId, or when a step fails, only `{ appId }` is returned.
  */
 export const getAvatarToken = async (
   appId: string | null = null,
   authConfig: AuthConfig = defaults.auth,
-) => {
-  const logger = new Logger("getAvatarToken");
-  const tokens: Record<string, TokenResponse | null> = {};
-  let kioskToken: TokenResponse | null = null;
+): Promise<AvatarToken> => {
+  const config = resolveConfig(authConfig);
+  if (!appId) return { appId };
 
-  const PUBLIC_AUTH_URL =
-    authConfig.PUBLIC_AUTH_URL || defaults.auth.PUBLIC_AUTH_URL;
-  const PUBLIC_AUTH_REALM =
-    authConfig.PUBLIC_AUTH_REALM || defaults.auth.PUBLIC_AUTH_REALM;
-  const PRIVATE_AUTH_CLIENT_ID =
-    authConfig.PRIVATE_AUTH_CLIENT_ID || defaults.auth.PRIVATE_AUTH_CLIENT_ID;
-  const PRIVATE_AUTH_CLIENT_SECRET =
-    authConfig.PRIVATE_AUTH_CLIENT_SECRET ||
-    defaults.auth.PRIVATE_AUTH_CLIENT_SECRET;
-  const PRIVATE_API_BASE_URL =
-    authConfig.PRIVATE_API_BASE_URL || defaults.auth.PRIVATE_API_BASE_URL;
+  const clientToken = await getClientToken(config);
+  if (!clientToken) return { appId };
 
-  const getAvatarToken = async (appId: string | null = null) => {
-    await getSystemAccessToken();
-
-    let appToken: TokenResponse | null = null;
-    if (appId) {
-      appToken = await getAppAccessToken(appId);
-    }
-
-    return {
-      ...(appToken || {}),
-      appId,
-    };
-  };
-
-  const getAppAccessToken = async (
-    appId: string,
-    clientId = "avatar",
-  ): Promise<TokenResponse | null> => {
-    logger.debug(`Fetch app token for appId=${appId} clientId=${clientId}`);
-
-    const cacheKey = `${appId}-${clientId}`;
-
-    tokens[cacheKey] = tokens[cacheKey] || null;
-
-    if (tokens[cacheKey]) {
-      const expiresIn = tokens[cacheKey]?.expiresIn;
-      if (!expiresIn || new Date(expiresIn).getTime() - 30000 < Date.now()) {
-        tokens[cacheKey] = null;
+  const appClientId = "avatar";
+  const appToken = await cached(
+    `app:${config.apiBaseUrl}:${config.clientId}:${appId}:${appClientId}`,
+    async () => {
+      try {
+        const res = await axios.post(
+          `${config.apiBaseUrl}/platform/token`,
+          { appId, clientId: appClientId },
+          {
+            httpsAgent,
+            headers: { Authorization: `Bearer ${clientToken.accessToken}` },
+          },
+        );
+        return toToken(res.data);
+      } catch (e) {
+        logFailure(`App token for appId=${appId}`, e);
+        return null;
       }
-    }
+    },
+  );
 
-    if (tokens[cacheKey]) {
-      logger.debug(`Using cached token for ${cacheKey}`);
-      return tokens[cacheKey];
-    }
-
-    try {
-      const url = `${PRIVATE_API_BASE_URL}/platform/token`;
-      const data = {
-        appId,
-        clientId,
-      };
-
-      logger.debug(`Requesting to ${url}`);
-      const res = await axios.post(url, data, {
-        httpsAgent,
-        headers: {
-          Authorization: `Bearer ${kioskToken?.accessToken}`,
-        },
-      });
-
-      // expires 1min before
-      const expiresIn = res.data.expires_in * 1000;
-      logger.debug(
-        `Token for ${appId} expires in ${Math.round(expiresIn / 60 / 60 / 1000)}min`,
-      );
-
-      const { access_token, refresh_token } = res.data;
-
-      const token = {
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresIn: new Date(Date.now() + expiresIn),
-      };
-
-      tokens[cacheKey] = token;
-
-      return token;
-    } catch (e) {
-      if (e instanceof Error) logger.error(`Request failed ${e?.message}`);
-      if (isAxiosError(e)) {
-        logger.error(e.response?.data);
-        delete tokens[cacheKey];
-      }
-    }
-    return null;
-  };
-
-  const getSystemAccessToken = async (): Promise<TokenResponse | null> => {
-    const cacheKey = "___kiosk___";
-
-    if (tokens[cacheKey]) {
-      const expiresIn = tokens[cacheKey]?.expiresIn;
-      if (!expiresIn || new Date(expiresIn).getTime() - 30000 < Date.now()) {
-        tokens[cacheKey] = null;
-      }
-    }
-
-    if (tokens[cacheKey]) return tokens[cacheKey];
-
-    logger.debug(`Load kiosk access token`);
-
-    const url = `${PUBLIC_AUTH_URL}/realms/${PUBLIC_AUTH_REALM}/protocol/openid-connect/token`;
-    const data = {
-      client_id: PRIVATE_AUTH_CLIENT_ID,
-      client_secret: PRIVATE_AUTH_CLIENT_SECRET,
-      grant_type: "client_credentials",
-    };
-
-    try {
-      logger.debug(`Requesting to ${url}`);
-      const res = await axios.post(url, data, {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Bearer ${btoa(PRIVATE_AUTH_CLIENT_ID + ":" + PRIVATE_AUTH_CLIENT_SECRET)}`,
-        },
-      });
-
-      // expires 1min before
-      const expiresIn = res.data.expires_in * 1000;
-      logger.debug(
-        `kioskToken expires in ${Math.round(expiresIn / 60 / 60 / 1000)}min`,
-      );
-
-      // const access_token = await getAuthorizationToken(res.data.access_token)
-      const { access_token, refresh_token } = res.data;
-
-      kioskToken = {
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresIn: new Date(Date.now() + expiresIn),
-      };
-
-      tokens["__kiosk"] = kioskToken;
-
-      return kioskToken;
-    } catch (e) {
-      kioskToken = null;
-      if (e instanceof Error) logger.error(`Request failed ${e.message}`);
-      if (isAxiosError(e)) {
-        logger.error(e.response?.data);
-      }
-    }
-    return null;
-  };
-
-  return await getAvatarToken(appId);
+  return { ...(appToken || {}), appId };
 };
 
 /**
- * Returns access and refresh tokens for the given appId
- * @param {string} appId null by default
+ * Returns access and refresh tokens for an app client that authenticates with
+ * its own secret (server to server).
  * @param {AuthConfig} authConfig only PRIVATE_API_BASE_URL and PRIVATE_AUTH_CLIENT_ID are used
- * @param {string} clientSecret needed for server2server authentication
+ * @param {string} clientSecret the app client's secret
  */
 export const getAvatarTokenWithClientSecret = async (
   appId: string | null = null,
   authConfig: AuthConfig = defaults.auth,
   clientSecret: string = "",
-) => {
-  const logger = new Logger("getAvatarTokenWithClientSecret");
-  const tokens: Record<string, TokenResponse | null> = {};
+): Promise<AvatarToken> => {
+  const config = resolveConfig(authConfig);
+  if (!appId) return { appId };
 
-  const PRIVATE_API_BASE_URL =
-    authConfig.PRIVATE_API_BASE_URL || defaults.auth.PRIVATE_API_BASE_URL;
-  const PRIVATE_AUTH_CLIENT_ID =
-    authConfig.PRIVATE_AUTH_CLIENT_ID || defaults.auth.PRIVATE_AUTH_CLIENT_ID;
-
-  const getAppAccessTokenWithClientSecret = async (
-    appId: string,
-    clientId = "avatar",
-    clientSecret = "",
-  ): Promise<TokenResponse | null> => {
-    logger.debug(
-      `Fetch app token for appId=${appId} clientId=${clientId} clientSecret=${clientSecret}`,
-    );
-
-    const cacheKey = `${appId}-${clientId}`;
-
-    tokens[cacheKey] = tokens[cacheKey] || null;
-
-    if (tokens[cacheKey]) {
-      const expiresIn = tokens[cacheKey]?.expiresIn;
-      if (
-        !expiresIn ||
-        new Date(expiresIn).getTime() - 60 * 1000 < Date.now()
-      ) {
-        tokens[cacheKey] = null;
+  const appToken = await cached(
+    `secret:${config.apiBaseUrl}:${appId}:${config.clientId}`,
+    async () => {
+      try {
+        const res = await axios.post(
+          `${config.apiBaseUrl}/platform/token/access_token`,
+          { appId, clientId: config.clientId, clientSecret },
+          { httpsAgent },
+        );
+        return toToken(res.data);
+      } catch (e) {
+        logFailure(
+          `App token for appId=${appId} clientId=${config.clientId}`,
+          e,
+        );
+        return null;
       }
-    }
-
-    if (tokens[cacheKey]) {
-      logger.debug(`Using cached token for ${cacheKey}`);
-      return tokens[cacheKey];
-    }
-
-    try {
-      const url = `${PRIVATE_API_BASE_URL}/platform/token/access_token`;
-      logger.debug(`Requesting to ${url}`);
-      const data = {
-        appId,
-        clientId,
-        clientSecret,
-      };
-      logger.debug(`get token from ${url}`);
-      const res = await axios.post(url, data, {
-        httpsAgent,
-      });
-
-      // expires 1min before
-      const expiresIn = res.data.expires_in * 1000;
-      logger.debug(
-        `Token for ${appId} expires in ${Math.round(expiresIn / 60 / 60 / 1000)}min`,
-      );
-
-      const { access_token, refresh_token } = res.data;
-
-      const token = {
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresIn: new Date(Date.now() + expiresIn),
-      };
-
-      tokens[cacheKey] = token;
-
-      return token;
-    } catch (e) {
-      if (e instanceof Error) logger.error(`Request failed ${e.message}`);
-      if (isAxiosError(e)) {
-        logger.error(e.response?.data);
-        delete tokens[cacheKey];
-      }
-    }
-    return null;
-  };
-
-  const getAvatarTokenWithClientSecret = async (
-    appId: string | null = null,
-    clientId: string = "",
-    clientSecret = "",
-  ) => {
-    let appToken: TokenResponse | null = null;
-    if (appId) {
-      appToken = await getAppAccessTokenWithClientSecret(
-        appId,
-        clientId,
-        clientSecret,
-      );
-    }
-
-    return {
-      ...(appToken || {}),
-      appId,
-    };
-  };
-
-  return await getAvatarTokenWithClientSecret(
-    appId,
-    PRIVATE_AUTH_CLIENT_ID,
-    clientSecret,
+    },
   );
+
+  return { ...(appToken || {}), appId };
 };

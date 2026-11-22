@@ -32,7 +32,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@sermas/api-client": "^2.0.0",
+    "@sermas/api-client": "^2.0.1",
     "axios": "^1.21.0",
     "eventemitter2": "^6.4.9",
     "jwt-decode": "^4.0.0",

@@ -1,5 +1,8 @@
-import { AppToolsDTO, DialogueToolsRepositoryDto } from "@sermas/api-client";
-import { BaseSessionWrapper } from "../dto/session.js";
+import type {
+  AppToolsDTO,
+  DialogueToolsRepositoryDto,
+} from "@sermas/api-client";
+import type { BaseSessionWrapper } from "../dto/session.js";
 import { SermasApp } from "./sermas.js";
 
 type ToolsSchemaValues = string | number | boolean | undefined;

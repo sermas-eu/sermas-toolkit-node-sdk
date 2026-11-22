@@ -1,8 +1,10 @@
 import { Logger } from "@sermas/api-client";
-import OpenAI, { ClientOptions } from "openai";
+import OpenAI, { type ClientOptions } from "openai";
 
 export type OpenAIConfig = {
   apiKey: string;
+  /** chat model, `gpt-4o-mini` by default */
+  model?: string;
 } & ClientOptions;
 
 type ChatCompletionMessage = {
@@ -15,22 +17,25 @@ type ChatCompletionMessage = {
 class OpenAIClient {
   private logger = new Logger(`SERMAS SDK OpenAIClient`);
   private openAI: OpenAI;
+  private model: string;
 
   constructor(openAIConfig: OpenAIConfig) {
     if (!openAIConfig.apiKey)
       this.logger.warn("No API key provided for OpenAIClient");
-    this.openAI = new OpenAI(openAIConfig);
+    const { model, ...options } = openAIConfig;
+    this.model = model || "gpt-4o-mini";
+    this.openAI = new OpenAI(options);
   }
 
   async chat(
     body: string | ChatCompletionMessage,
-    options?: OpenAI.RequestOptions<unknown>,
+    options?: OpenAI.RequestOptions,
   ) {
     try {
       const result: OpenAI.Chat.ChatCompletion =
         await this.openAI.chat.completions.create(
           {
-            model: "gpt-3.5-turbo",
+            model: this.model,
             ...(typeof body === "string"
               ? { messages: [{ role: "user", content: body }] }
               : body),
@@ -47,7 +52,7 @@ class OpenAIClient {
 
   async json<T = Record<string, unknown>>(
     body: string | OpenAI.Chat.ChatCompletionCreateParams,
-    options?: OpenAI.RequestOptions<unknown>,
+    options?: OpenAI.RequestOptions,
   ) {
     let text = await this.chat(body, options);
     if (text === null) return;

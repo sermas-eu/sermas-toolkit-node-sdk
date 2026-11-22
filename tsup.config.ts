@@ -1,8 +1,9 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig((options) => ({
-  entry: ["./src/index.ts"],
-  target: "es2020",
+  // `auth` alone: token helpers without the app framework's dependencies
+  entry: { index: "./src/index.ts", auth: "./src/modules/auth.ts" },
+  target: "es2022",
   format: ["cjs", "esm"],
   splitting: false,
   sourcemap: true,
@@ -11,4 +12,7 @@ export default defineConfig((options) => ({
   dts: true,
   silent: !options.watch,
   cjsInterop: false,
+  // a dependency, not bundled: tsconfig `paths` points at its sources for
+  // development only
+  external: ["@sermas/api-client"],
 }));

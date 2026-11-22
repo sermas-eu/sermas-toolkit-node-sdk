@@ -1,21 +1,22 @@
 import {
-  AgentChangedDto,
-  AgentEvaluatePromptDto,
-  AppToolsDTO,
-  DialogueMessageDto,
-  DialogueToolTriggeredEventDto,
-  DialogueToolsRepositoryDto,
   Logger,
-  PlatformAppDto,
   SermasApiClient,
-  SessionChangedDto,
-  SessionDto,
-  SessionStorageRecordDto,
-  SessionStorageSearchDto,
-  UIContentDto,
-  UIInteractionEventDto,
+  type AgentChangedDto,
+  type AgentEvaluatePromptDto,
+  type AppToolsDTO,
+  type DialogueMessageDto,
+  type DialogueToolTriggeredEventDto,
+  type DialogueToolsRepositoryDto,
+  type PlatformAppDto,
+  type SessionChangedDto,
+  type SessionDto,
+  type SessionStorageRecordDto,
+  type SessionStorageSearchDto,
+  type UIContentDto,
+  type UIInteractionEventDto,
 } from "@sermas/api-client";
-import ee2 from "eventemitter2";
+// default import: eventemitter2 is CommonJS, and Node finds no named export in it
+import EventEmitter2 from "eventemitter2";
 import { defaults } from "../config/defaults.js";
 
 export type SermasConfig = {
@@ -36,25 +37,25 @@ class SermasApp {
   private clientSecret: string;
   private appId: string;
 
-  public emitter: ee2.EventEmitter2;
+  public emitter: EventEmitter2;
   public subs: (() => void)[] = [];
 
   constructor(
     sermasConfig: SermasConfig,
-    emitter: ee2.EventEmitter2,
+    emitter?: EventEmitter2,
     logger: Logger = new Logger("SERMAS SDK"),
   ) {
     this.baseUrl =
       sermasConfig.SERMAS_BASE_URL || defaults.sermas.SERMAS_BASE_URL;
-    this.appId = sermasConfig.SERMAS_APPID || defaults.sermas.SERMAS_CLIENT_ID;
+    this.appId = sermasConfig.SERMAS_APPID || defaults.sermas.SERMAS_APPID;
     this.clientId =
-      sermasConfig.SERMAS_CLIENT_ID || defaults.sermas.SERMAS_CLIENT_SECRET;
+      sermasConfig.SERMAS_CLIENT_ID || defaults.sermas.SERMAS_CLIENT_ID;
     this.clientSecret =
-      sermasConfig.SERMAS_CLIENT_SECRET || defaults.sermas.SERMAS_APPID;
+      sermasConfig.SERMAS_CLIENT_SECRET || defaults.sermas.SERMAS_CLIENT_SECRET;
 
     this.logger = logger;
 
-    this.emitter = emitter || new ee2.EventEmitter2();
+    this.emitter = emitter || new EventEmitter2();
 
     this.client = new SermasApiClient({
       baseURL: this.getBaseUrl(),
@@ -142,7 +143,7 @@ class SermasApp {
         this.subs.push(fn);
       })
       .catch((e) => {
-        this.logger.error(`Subscribe failed: ${e.stack}`);
+        this.logger.error(`Subscribe failed: ${e?.stack}`);
       });
   }
   async prompt(prompt: AgentEvaluatePromptDto) {

@@ -1,6 +1,8 @@
 export const defaults = {
   auth: {
-    PUBLIC_AUTH_URL: "http://172.17.0.1:8080/keycloak",
+    // the API's own token endpoint (AUTH_PROVIDER=local, the default); a Keycloak
+    // base URL (…/keycloak) with AUTH_PROVIDER=keycloak
+    PUBLIC_AUTH_URL: "http://172.17.0.1:8080/api/auth/oidc",
     PUBLIC_AUTH_REALM: "sermas-local",
     PRIVATE_AUTH_CLIENT_ID: "platform",
     PRIVATE_AUTH_CLIENT_SECRET: "platform",

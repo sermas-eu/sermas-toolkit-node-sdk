@@ -12,7 +12,7 @@ token its browser code uses:
 import { getAvatarToken } from "@sermas/sermas-toolkit-node-sdk";
 
 const token = await getAvatarToken("my-app", {
-  PUBLIC_AUTH_URL: "http://localhost:8080/keycloak",
+  PUBLIC_AUTH_URL: "http://localhost:8080/api/auth/oidc",
   PUBLIC_AUTH_REALM: "sermas-local",
   PRIVATE_AUTH_CLIENT_ID: "kiosk",
   PRIVATE_AUTH_CLIENT_SECRET: "<kiosk client secret>",

@@ -15,7 +15,8 @@ import {
   type UIContentDto,
   type UIInteractionEventDto,
 } from "@sermas/api-client";
-import { EventEmitter2 } from "eventemitter2";
+// default import: eventemitter2 is CommonJS, and Node finds no named export in it
+import EventEmitter2 from "eventemitter2";
 import { defaults } from "../config/defaults.js";
 
 export type SermasConfig = {
